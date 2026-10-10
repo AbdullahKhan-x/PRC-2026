@@ -1,3 +1,9 @@
-boto3
-polars
-pyarrow
+# Python >= 3.11 (developed on 3.14 / Linux; works on Windows). Versions pinned to those that produced our submissions.
+pandas==3.0.6
+numpy==2.5.3
+pyarrow==25.0.1
+lightgbm==4.7.0
+scipy==1.18.1
+requests==2.34.2
+boto3            # download.py (challenge bucket)
+kaggle==2.2.4    # optional: ADS-B extraction / experiments on Kaggle

@@ -1,0 +1,10 @@
+# keep LF in the repo; Windows checkouts get native endings for text, never touch binaries
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
+*.parquet binary
+*.zip binary
+*.npy binary
+*.pkl binary
