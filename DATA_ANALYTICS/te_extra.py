@@ -65,3 +65,17 @@ def apply(df, enc):
 
 
 COLS = ['te_dlt_stand', 'te_dlt_op', 'te_dlt_rwy', 'te_cpy_stand', 'te_cpy_op', 'imp_minus_dlt_stand']
+
+
+def add_witness(x):
+    """B8 witness-difference features (need ADS-B adsb_move_gap): when the aircraft started moving relative to each
+    other record of the off-block moment. Trees cannot subtract columns, so the differences are given explicitly."""
+    g = x['adsb_move_gap'].astype('float32')
+    x['w_move_m_aobt'] = (x['implied_taxi_aobt'] - g).astype('float32')          # t_move - AOBT_3
+    x['w_move_m_eobt'] = (x['mvt_m_eobt'] - g).astype('float32')                 # t_move - EOBT_1
+    x['w_move_m_lobt'] = (x['lobt_mvt_m_lobt'] - g).astype('float32')            # t_move - LOBT
+    x['w_move_m_sch'] = (x['sched_dev'] - g).astype('float32')                    # t_move - SCHED
+    return x
+
+
+WITNESS_COLS = ['w_move_m_aobt', 'w_move_m_eobt', 'w_move_m_lobt', 'w_move_m_sch']

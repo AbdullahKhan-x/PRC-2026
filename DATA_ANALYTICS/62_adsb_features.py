@@ -133,8 +133,12 @@ if __name__ == '__main__':
     b = build(rk, files)
     b.to_parquet(os.path.join(D, 'adsb_rank.parquet'), index=False)
     print('rank', b.shape, 'matched share (days with files):', round(b.adsb_matched.mean(), 3))
-    if os.environ.get('MERGE_CTX'):          # also write ctxads_{train,rank} = ctxall + adsb (for harness runs)
+    if os.environ.get('MERGE_CTX'):          # also write {MERGE_OUT}_{train,rank} = ctxall + adsb (for harness runs)
+        out = os.environ.get('MERGE_OUT', 'ctxads')          # use a NEW name on Kaggle: dataset files are read-only links
         for s_ in ('train', 'rank'):
+            dst = os.path.join(D, f'{out}_{s_}.parquet')
+            if os.path.islink(dst):
+                os.remove(dst)
             pd.read_parquet(os.path.join(D, f'ctxall_{s_}.parquet')).merge(pd.read_parquet(os.path.join(D, f'adsb_{s_}.parquet')),
-                on='MVT_ID_mvt', how='left').to_parquet(os.path.join(D, f'ctxads_{s_}.parquet'), index=False)
-        print('ctxads written', flush=True)
+                on='MVT_ID_mvt', how='left').to_parquet(dst, index=False)
+        print(f'{out} written', flush=True)

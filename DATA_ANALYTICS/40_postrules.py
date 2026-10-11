@@ -70,6 +70,17 @@ pred = np.clip(blend(p), 60, 172800)
 if 'C' in RULES:
     m = rome & (sd > 10800) & (sd <= 20000)
     pred = np.where(m, P_ROME_3H * sd + (1 - P_ROME_3H) * T_CLEAN, pred); changed['C'] = m
+if 'F' in RULES:          # rule C refined by flight-code format (rule_f.py)
+    sys.path.insert(0, os.path.join(D, 'DATA_ANALYTICS')); import rule_f
+    rate = rule_f.fit(D)
+    pred, m, fr = rule_f.apply(pred, base, sd, rome, rk.FLIGHT_mvt.values, rate); changed['F'] = m
+    print(f'   rule F: copy rate long/odd format {rate[True]:.3f}, standard {rate[False]:.3f}, t_clean {rate['t_clean']:.0f}; {int(m.sum())} rows, {int((m & fr).sum())} long-format')
+if 'G' in RULES:          # rule C rebuilt: copy rate = mean(format, airline x destination), anchor = ctx2id base (rule_g.py)
+    sys.path.insert(0, os.path.join(D, 'DATA_ANALYTICS')); import rule_g
+    cx = pd.read_parquet(os.path.join(D, 'candidates', 'parts_ctx2id.parquet'), columns=['MVT_ID_mvt', 'base'])
+    anc = cx.set_index('MVT_ID_mvt').loc[parts.MVT_ID_mvt.values, 'base'].values
+    pred, m, r = rule_g.apply(pred, sd, rome, rk.FLIGHT_mvt.values, rk.ADES_mvt.values, anc, rule_g.fit(D)); changed['G'] = m
+    print(f'   rule G: {int(m.sum())} rows, mean P(copy) {r[m].mean():.3f}, mean anchor {anc[m].mean():.0f}')
 if 'E' in RULES:          # Rome, no NM record, 1-5.5 h late: band x airline x destination copy rate
     sys.path.insert(0, os.path.join(D, 'DATA_ANALYTICS')); import rome_rates
     tab = rome_rates.fit(rome_rates.load_2025(D))
@@ -77,6 +88,11 @@ if 'E' in RULES:          # Rome, no NM record, 1-5.5 h late: band x airline x d
     m = rome & (sd > 3600) & (sd <= 20000)
     pred = np.where(m, pe, pred); changed['E'] = m
     print(f'   rule E: {int(m.sum())} rows, mean P(copy) {pp[m].mean():.3f}, t_clean {tab["t_clean"]:.0f}')
+if 'S' in RULES:          # B' (rule_s.py): Rome date stamps, 65-100k s late, local-date crossing
+    sys.path.insert(0, os.path.join(D, 'DATA_ANALYTICS')); import rule_s
+    cr = rule_s.cross_days(rk.MVT_TIME_UTC_mvt.values, rk.SCHED_TIME_UTC_mvt.values)
+    assert (cr == cross).all(), 'cross mismatch'
+    pred, m = rule_s.apply(pred, sd, rome, cr); changed['S'] = m
 if 'B' in RULES:
     m = rome & (cross >= 1) & (sd > 55000) & (sd <= 100000)
     pred = np.where(m, W_SHIFT * (86400 * cross + T_CLEAN) + (1 - W_SHIFT) * pred, pred); changed['B'] = m

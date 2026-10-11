@@ -49,13 +49,13 @@ def metar():
 
 
 FULL = {'LR': '0.04', 'ROUNDS': '1800', 'TE_EXTRA': '1'}
-MEMBERS = {   # tag: extra env for 44_train_full.py   (v116 recipe; see docs and 53b_make_blend4.py)
-    'ctx2id': {'EXTRA': 'ctxall_train.parquet', 'EXTRA_RANK': 'ctxall_rank.parquet'},
-    'ctx2rep': {'EXTRA': 'ctxall_train.parquet', 'EXTRA_RANK': 'ctxall_rank.parquet', 'DROP_BASE': 'AIRCRAFT_OPERATOR_flt,ADES_flt'},
-    'ctx2res': {'EXTRA': 'ctxall_train.parquet', 'EXTRA_RANK': 'ctxall_rank.parquet', 'RESID': '1'},
-    'ctx3': {'EXTRA': 'ctx3_train.parquet', 'EXTRA_RANK': 'ctx3_rank.parquet', 'TE_EXTRA2': '1'},
-    'kae': {'EXTRA': 'ctxae_train.parquet', 'EXTRA_RANK': 'ctxae_rank.parquet'},
-    'ctx2ida': {'EXTRA': 'ctxall_train.parquet', 'EXTRA_RANK': 'ctxall_rank.parquet', 'APT_W': '0.5'},
+AE12 = {'EXTRA': 'ctxae12_train.parquet', 'EXTRA_RANK': 'ctxae12_rank.parquet', 'SEEDS': '42,2,3'}
+MEMBERS = {   # tag: extra env for 44_train_full.py   (v133 recipe: recipes/v133.json, 53c_make_blend_ads3.py)
+    'ctx2id': {'EXTRA': 'ctxall_train.parquet', 'EXTRA_RANK': 'ctxall_rank.parquet'},          # rule G anchor
+    'kae12': AE12,                                                                                  # 12-month ADS-B + external
+    'krepae12': {**AE12, 'DROP_BASE': 'AIRCRAFT_OPERATOR_flt,ADES_flt'},                            # without NM operator/destination
+    'kresae12': {**AE12, 'RESID': '1'},                                                             # target y - (MVT - AOBT)
+    'kae12apt': {**AE12, 'APT_ONLY': '1'},                                                          # 10 per-airport models x 3 seeds
 }
 
 
@@ -84,15 +84,15 @@ STEPS = [
     ('context', [p('ctxall_train.parquet'), p('ctx3_train.parquet'), p('ext_train.parquet')],
      lambda: (run('42_context_features.py'), run('42b_context_features2.py'), merge('ctxall', 'ctx', 'ctx2'),
               run('42f_labelfree.py'), merge('ctx3', 'ctxall', 'lf'), run('42d_external.py'))),
-    ('adsb', [p('adsb_train.parquet'), p('ctxae_train.parquet')],
-     lambda: (adsb(), merge('ctxae', 'ctxall', 'adsb', 'ext'))),
+    ('adsb', [p('adsb_train.parquet'), p('ctxae12_train.parquet')],          # ADS-B for all twelve 2025 months
+     lambda: (adsb(), merge('ctxae12', 'ctxall', 'adsb', 'ext'))),
     ('members', [os.path.join(C, f'parts_{t}.parquet') for t in MEMBERS], members),
-    ('blend', [os.path.join(C, 'logical-ladder_v116.parquet')],
-     lambda: (run('53b_make_blend4.py', 'v116', '0.25', '0.3', '0.5', 'kae'),
-              run('40_postrules.py', 'ACD', '116', os.path.join(C, 'parts_v116.parquet')))),
-    ('final', [os.path.join(C, 'FINAL_v116_4month.parquet')],
-     lambda: run('55_final_v116.py', p('data', 'raw', 'final_ranking.parquet'), p('data', 'raw', 'final_submitting.parquet'),
-                 os.path.join(C, 'FINAL_v116_4month.parquet'))),
+    ('blend', [os.path.join(C, 'logical-ladder_v133.parquet')],
+     lambda: (run('53c_make_blend_ads3.py', 'v133', '0.3', 'kae12,krepae12,kresae12', env={'APT_PURE': 'kae12apt'}),
+              run('40_postrules.py', 'ADG', '133', os.path.join(C, 'parts_v133.parquet')))),
+    ('final', [os.path.join(C, 'FINAL_v134_4month.parquet')],          # v134 = v133 + rule S (Rome date stamps)
+     lambda: run('55b_final_recipe.py', p('recipes', 'v134.json'), p('data', 'raw', 'final_ranking.parquet'),
+                 p('data', 'raw', 'final_submitting.parquet'), os.path.join(C, 'FINAL_v134_4month.parquet'))),
 ]
 
 if __name__ == '__main__':

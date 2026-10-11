@@ -25,6 +25,14 @@ written behind an element-wise template-order gate.
 | **v104** | v103 + rule D (no NM record outside Rome: p = 0) | **291.12** |
 | **v105** | v104 rules on a base retrained with the context features | **284.68** |
 | v106 | (rejected upload: daily limit) | - |
+| v107 | v105 rules on the ctx2id base (flight-plan gaps, live arrival-copy rates, clock-offset encodings) | 277.22 |
+| v110 | 0.5 ctx2id + 0.5 ctx2rep (no NM operator/destination), then 0.3 per-airport models | 274.18 |
+| v112 | + residual-target member (ctx2res) and record-provenance member (ctx3) | 273.33 |
+| v114 | + ADS-B member (adsb.lol ground traces, 4 months of 2025) | 269.37 |
+| **v116** | ADS-B member with EUROCONTROL daily series + OPDI flight lists | **268.60** |
+| **v126** | every member with ADS-B + external data, ADS-B for all 12 months of 2025, 3 seeds, per-airport layer with ADS-B | **262.39** |
+| v127 | v126 + record-provenance member with ADS-B (ctx3ae12) | 261.77 |
+| **v133** | v126 with rule G instead of C (Rome copy rate by flight-code format and airline × destination, ctx2id anchor; 47 rows) | **259.17** |
 
 Lessons that shaped the method:
 
