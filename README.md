@@ -15,7 +15,14 @@ LSZH, LTFM). The metric is **uncapped RMSE**.
 | v116 | + EUROCONTROL daily delay series + OPDI flight lists in the ADS-B member | 268.60 |
 | v126 | every member with ADS-B + external data, ADS-B for all 12 months of 2025, 3 seeds per member, per-airport layer retrained with ADS-B | 262.39 |
 | v127 | v126 + record-provenance member with ADS-B | 261.77 |
-| **v133** | v126 + rule G (Rome schedule copies: copy rate by flight-code format and airline × destination) | **259.17** |
+| v133 | v126 + rule G (Rome schedule copies: copy rate by flight-code format and airline × destination) | 259.17 |
+| v137 | geometry (ADS-B ground-track) LightGBM members + ctx3ae12 member + 0.5 × CatBoost (3 seeds) | 253.24 |
+| v141 | + rules T/P (twin-arrival LOBT window, LFPG duplicate records) and DD (EUROCONTROL daily delay totals) | 251.54 |
+| v143 | geometry CatBoost (2 seeds) replaces plain CatBoost | 249.84 |
+| v151 | + FL (Rome flight-number copy habit), DDG (adaptive daily-delay guard), NX residual corrector on all airports, K (LIRF monthly count), S′ (Rome date-wrap expectation) | 248.17 |
+| v155 | 5 CatBoost seeds, CAP (LEMD/LEBL ≤ 3,604 s), guarded monthly-mean rule M | 247.31 |
+| v157 | + rule ADSB (blend toward the direct ADS-B taxi observation, grade-A rows) | 247.24 |
+| **v159** | + linear-tree leaves in the NX corrector (twin of the **final submission**, see §2b) | **247.02** |
 
 Every change was first validated on held-out months of 2025 (Jan, Feb, Jun, Jul) and only then submitted.
 Full history, including what failed: [`docs/submissions.md`](docs/submissions.md) and
@@ -57,6 +64,16 @@ rules      A  LOBT window (p = 0 when a copy is impossible; projection onto [MVT
 ```
 `recipes/v133.json` / `recipes/v134.json` describe the blend and rules for `55b_final_recipe.py`.
 
+## 2b. Final submission (14 Oct 2026)
+
+**Final submission = v163**, uploaded successfully as `logical-ladder_final.parquet`. It uses recipe `recipes/v158.json`, followed by the ADS-B post-rule and Rome date-wrap hedge. The NX corrector stacks an averaged sequence-model bag of two bi-GRU models, C and D. The final artifact was validated for row count, template order, finite predictions, minimum values and duplicates.
+
+The sequence models use neighbouring departure and arrival movements, including timing, delay, runway and flight attributes, to predict taxi-out directly. Their predictions provide complementary information to the existing model through the NX corrector. The final C+D bag was selected over the C+D+F alternative because F's additional held-out gain was only 0.057 RMSE, below the 0.10 threshold for replacing the simpler bag.
+
+The Jan/Jul 2026 score of **247.02 belongs to v159**, the earlier twin of the v161 submission—not v163. The final v163 leaderboard score has not been recorded here.
+
+Full experiment history, including unsuccessful alternatives: `docs/submissions.md`.
+
 ## 3. Setup
 
 Python ≥ 3.11 (developed on 3.14, Linux; works on Windows). About 8 GB RAM; ~45 GB free disk if ADS-B is kept locally.
@@ -89,6 +106,13 @@ python run_all.py --only members  # a single step
 | members | `44_train_full.py` (one run per member, `SEEDS=42,2,3`; `APT_ONLY=1` for kae12apt) | `candidates/parts_*.parquet`, models |
 | blend | `53c_make_blend_ads3.py` (`APT_PURE=kae12apt`), `40_postrules.py ADG` | `candidates/logical-ladder_v133.parquet` |
 | final | `55b_final_recipe.py recipes/v134.json final_ranking.parquet final_submitting.parquet OUT` | 4-month final submission |
+
+**Sequence model (v162 candidate).** `python DATA_ANALYTICS/72_seq_rows.py` (held-out p + label-free inputs →
+`candidates/seq/seq_rows.parquet`), run `DATA_ANALYTICS/70_seq_direct_kernel.py` on a GPU with the raw training months and
+`seq_rows.parquet` as inputs (writes `dq_*.parquet` = held-out q and `dseq_*.pt` = full fit), score the stacking with
+`73_seq_stack_eval.py dq_*.parquet`, write 2026 q with `OUT_Q=q_final.parquet python DATA_ANALYTICS/71_seq_apply.py dseq_*.pt w0.json BASE OUT`
+(`w0.json` = `{"global": 0}`), then rebuild with `NXQ_TRAIN=dq_*.parquet NXQ_FINAL=q_final.parquet python DATA_ANALYTICS/55b_final_recipe.py recipes/v158.json ...`
+followed by `56a_adsb_post.py` and `56b_wraphedge_post.py`.
 
 **ADS-B point files.** The adsb.lol archives are 3–4 GB per day, so they are filtered on Kaggle, where downloads are fast:
 `python kaggle/make_adsb_kernels.py A B C D E G H I` (A/B = 2026, C–I = all of 2025; needs `pip install kaggle` and a Kaggle API token), then download each

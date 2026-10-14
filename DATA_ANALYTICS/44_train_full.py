@@ -22,6 +22,8 @@ LEARNER = os.environ.get('LEARNER', 'lgb')        # lgb | cat (CatBoost member; 
 CAT_PRM = dict(iterations=int(os.environ.get('CAT_ITERS', '2500')), learning_rate=float(os.environ.get('CAT_LR', '0.12')),
                depth=int(os.environ.get('CAT_DEPTH', '8')), loss_function='RMSE', thread_count=-1, verbose=500, border_count=254,
                task_type=os.environ.get('CAT_TASK', 'CPU'))
+if os.environ.get('CAT_PARAMS'):                 # random-search overrides (same as 41_oof_harness)
+    CAT_PRM.update(__import__('json').loads(os.environ['CAT_PARAMS']))
 
 tr = v35.load_train()
 feats = [c for c in (v35.CAT_COLS + v35.TIME_COLS + v35.AOBT_COLS + v35.ENC_COLS + v35.QUEUE_COLS

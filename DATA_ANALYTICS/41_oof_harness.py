@@ -118,10 +118,13 @@ class AltModel:
         self.kind, self.cats = kind, list(cats)
         if kind == 'cat':
             from catboost import CatBoostRegressor
-            self.m = CatBoostRegressor(iterations=int(os.environ.get('CAT_ITERS', '3000')), learning_rate=float(os.environ.get('CAT_LR', '0.12')),
-                                       depth=int(os.environ.get('CAT_DEPTH', '8')), loss_function='RMSE', random_seed=seed,
-                                       thread_count=-1, verbose=500, border_count=254,
-                                       task_type=os.environ.get('CAT_TASK', 'CPU'))       # CAT_TASK=GPU on Kaggle GPU kernels
+            kw = dict(iterations=int(os.environ.get('CAT_ITERS', '3000')), learning_rate=float(os.environ.get('CAT_LR', '0.12')),
+                      depth=int(os.environ.get('CAT_DEPTH', '8')), loss_function='RMSE', random_seed=seed,
+                      thread_count=-1, verbose=500, border_count=254,
+                      task_type=os.environ.get('CAT_TASK', 'CPU'), l2_leaf_reg=float(os.environ.get('CAT_L2', '3')))       # CAT_TASK=GPU on Kaggle GPU kernels
+            if os.environ.get('CAT_PARAMS'):      # e.g. CAT_PARAMS={"random_strength":2,"bagging_temperature":0.5} (random search)
+                kw.update(__import__('json').loads(os.environ['CAT_PARAMS']))
+            self.m = CatBoostRegressor(**kw)
             self.m.fit(self._cat(X), y, cat_features=self.cats, sample_weight=w)
         else:
             import xgboost as xgb

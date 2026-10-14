@@ -58,6 +58,7 @@ q12, w15, c42, c42b, c42f, c42d, a62, v35, c42h = (load(n) for n in ['12_queue_f
                                                               '42b_context_features2.py', '42f_labelfree.py', '42d_external.py',
                                                               '62_adsb_features.py', '24_v35.py', '42h_stand_arrcopy.py'])
 g62b = load('62b_adsb_geo.py')
+c42j = load('42j_next_arrival.py')
 sys.path.insert(0, A); import te_extra, te_extra2
 from pandas._libs.parsers import STR_NA_VALUES
 
@@ -139,6 +140,8 @@ def _geo():
 
 NEED = {c for t in _recipe_tags(RECIPE) for c in pickle.load(open(os.path.join(C, f'meta_{t}.pkl'), 'rb'))['extra']}
 MORE = [lf, ext, adsb, sac]
+if NEED & set(c42j.NA):                         # stand-turnover witnesses (next arrival at my stand)
+    MORE.append(cached('na.parquet', lambda: c42j.build(raw[c42j.COLS].copy())))
 if NEED & set(g62b.GEO):
     MORE.append(cached('geo.parquet', _geo))
     print('  ADS-B geometry ready', flush=True)
@@ -243,7 +246,7 @@ RULES = RECIPE.get('rules', 'ACD')
 assert RULES in ('ACD', 'ADF', 'ADG', 'ACDS', 'ADFS', 'ADGS'), 'only rules ACD / ADF / ADG (+S) implemented here'
 
 # ---------- 5. rules A C D (as 40_postrules.py) ----------
-cols = ['MVT_ID_mvt', 'MVT_TIME_UTC_mvt', 'SCHED_TIME_UTC_mvt', 'AOBT_3_flt', 'LOBT_flt', 'FLIGHT_mvt', 'ADES_mvt']
+cols = ['MVT_ID_mvt', 'MVT_TIME_UTC_mvt', 'SCHED_TIME_UTC_mvt', 'AOBT_3_flt', 'LOBT_flt', 'FLIGHT_mvt', 'ADES_mvt', 'EOBT_1_flt']
 rd = raw[raw.PHASE_mvt == 'DEP'][cols].set_index('MVT_ID_mvt').loc[ids].reset_index()
 ep = lambda s: (pd.to_datetime(s, utc=True) - pd.Timestamp('1970-01-01', tz='UTC')).dt.total_seconds().values
 mvt, sch, lobt = ep(rd.MVT_TIME_UTC_mvt), ep(rd.SCHED_TIME_UTC_mvt), ep(rd.LOBT_flt)
@@ -267,6 +270,67 @@ if 'S' in RULES:                                                             # S
     pred, _ = rule_s.apply(pred, sd, rome, rule_s.cross_days(rd.MVT_TIME_UTC_mvt.values, rd.SCHED_TIME_UTC_mvt.values))
 lo, hi = np.maximum(mvt - lobt - WIN, 0), mvt - lobt + WIN                   # A (clip)
 pred = np.where(has, np.clip(pred, lo, np.maximum(hi, lo)), pred)
+POST = RECIPE.get('post', '')            # 'TP' = rules T/P (rule_tp.py), 'DD' = daily delay constraint (rule_dd.py), 'NX' = no-ADS-B corrector (rule_nx.py), in that order
+if 'TP' in POST:
+    import rule_tp
+    ftp = rule_tp.features(raw).set_index('MVT_ID_mvt').loc[ids].reset_index()
+    ftp['tp_pair'] = ftp.tp_pair.fillna(False).astype(bool)
+    pred, mk = rule_tp.apply(pred, ftp)
+    print('  rules T/P rows', {k: int(v.sum()) for k, v in mk.items()}, flush=True)
+if 'FL' in POST:                         # FL = Rome flight-number copy habit (rule_fl.py), after T/P, before DD (held-out in stack −0.28, 4/4)
+    import rule_fl
+    pred, mfl, _ = rule_fl.apply(pred, sd, member('ctx2id'), rome, rd.FLIGHT_mvt.values, rule_fl.fit(rule_fl.load_2025(D)))
+    print(f'  rule FL rows {int(mfl.sum()):,}', flush=True)
+if 'DD' in POST:
+    import rule_dd
+    ddg = 'DDG' in POST                  # DDG = DDA + partial-day guard + adaptive cap 0.5
+    pred, sdd = rule_dd.apply(pred, mvt, sd, apt_raw, rule_dd.load_daily(D), elig_max=1e9 if ('DDA' in POST or ddg) else 7200,
+                              counts=rule_dd.load_counts(D) if ddg else None, adapt=0.5 if ddg else None)   # DDA = no delay limit
+    print(f'  rule DD rows shifted {int((sdd != 0).sum()):,}', flush=True)
+if 'NX' in POST:                         # NX = no-ADS-B corrector at LTFM/LFPG/EGLL (rule_nx.py), after T/P + DD
+    import rule_nx
+    rule_nx.ALL = 'NXA' in POST                                              # NXA = all airports, all rows
+    rule_nx.LINEAR = 'NXL' in POST                                           # NXL = linear_tree corrector leaves
+    na = cached('na.parquet', lambda: c42j.build(raw[c42j.COLS].copy()))
+    dnx = pd.DataFrame({'MVT_ID_mvt': ids, 'ADEP_mvt': apt_raw, 'pred': pred, 'sd': sd, 'mvt': mvt, 'lobt': lobt,
+                        'aobt': ep(rd.AOBT_3_flt), 'eobt': ep(rd.EOBT_1_flt)})
+    dnx = (dnx.merge(adsb[['MVT_ID_mvt', 'adsb_matched']], on='MVT_ID_mvt', how='left')
+              .merge(rule_nx.features(raw), on='MVT_ID_mvt', how='left')
+              .merge(na[['MVT_ID_mvt'] + rule_nx.NA], on='MVT_ID_mvt', how='left'))
+    assert (dnx.MVT_ID_mvt.values == ids).all()
+    nxtr = pd.read_parquet(os.path.join(C, 'nx_train_ddg.parquet' if 'DDG' in POST else 'nx_train.parquet'))
+    if os.environ.get('NXQ_TRAIN'):            # v162: direct sequence model q (70_seq_direct_kernel.py) as NX input (stacking)
+        qt = pd.read_parquet(os.environ['NXQ_TRAIN']).set_index(['MVT_ID_mvt', 'mon']).q        # held-out 2025 q (LOMO)
+        nxtr['q'] = qt.reindex(pd.MultiIndex.from_arrays([nxtr.MVT_ID_mvt.values, nxtr.mon.values])).values
+        dnx['q'] = pd.read_parquet(os.environ['NXQ_FINAL']).set_index('MVT_ID_mvt').q.reindex(dnx.MVT_ID_mvt.values).values   # 71_seq_apply.py
+        for f_ in (nxtr, dnx):
+            f_['qd'] = (f_.q - f_.pred).clip(-1500, 1500).fillna(0.0); f_['hasq'] = f_.q.notna().astype(float)
+        rule_nx.X = list(rule_nx.X) + ['qd', 'hasq']
+        print(f'  NXQ stacking: train q {nxtr.q.notna().mean():.3f}, final q {dnx.q.notna().mean():.3f}', flush=True)
+    pnx = rule_nx.apply(rule_nx.fit(nxtr), dnx)   # NX fitted on the same DD variant
+    print(f'  rule NX rows {int(rule_nx.segment(dnx).sum()):,}  mean shift {np.mean(pnx - pred):+.2f} s', flush=True)
+    pred = pnx
+
+if 'MON' in POST:                        # MON = rule M (rule_km.apply_m): monthly mean shift to the EUROCONTROL ATXOT mean, last
+    import rule_km
+    atx = rule_km.load_atxot(sorted(glob.glob(os.path.join(D, 'data/ext/atxot/taxi_out_*.csv'))))
+    pred, info = rule_km.apply_m(pred, sd, apt_raw, mvt, atx, json.load(open(os.path.join(D, 'recipes', 'constants', 'rule_m_tab.json'))))
+    print('  rule M cells (apt, ym, raw s, weight):', info, flush=True)
+if 'KCNT' in POST:                       # KCNT = rule K (rule_km.apply_k): LIRF monthly count of y > 2 h (ATXOT TF - VALID_FL), after M
+    import rule_km
+    atx = rule_km.load_atxot(sorted(glob.glob(os.path.join(D, 'data/ext/atxot/taxi_out_*.csv'))))
+    pred, info = rule_km.apply_k(pred, sd, nonm, apt_raw, mvt, atx, json.load(open(os.path.join(D, 'recipes', 'constants', 'rule_m_tab.json'))))
+    print('  rule K months (ym, K, expected before, lambda, rows):', info, flush=True)
+
+if 'SP' in POST:                         # SP = rule S' (rule_sp.py): Rome date-wrap vs copy, exact E[y], applied LAST (overrides its rows)
+    import rule_s, rule_sp
+    pred, msp = rule_sp.apply(pred, sd, rome, rule_s.cross_days(rd.MVT_TIME_UTC_mvt.values, rd.SCHED_TIME_UTC_mvt.values))
+    print(f"  rule S' rows {int(msp.sum()):,}", flush=True)
+
+if 'CAP' in POST:                        # CAP = LEMD/LEBL taxi-out never exceeds 3,604 s (2025: 0 of 392k; maxima 3,598 / 3,604), applied last
+    mcap = np.isin(apt_raw, ['LEMD', 'LEBL']) & (pred > 3604)
+    pred = np.maximum(np.where(mcap, 3604.0, pred), 60.0)                   # + final 60 s floor (rules FL/M can dip below it)
+    print(f'  rule CAP rows {int(mcap.sum()):,}', flush=True)
 
 # ---------- 6. gate ----------
 tmpl = pd.read_parquet(TMPL)
