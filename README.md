@@ -4,6 +4,10 @@ GPLv3 solution to the EUROCONTROL Performance Review Commission (PRC) / OpenSky 
 predict `TAXITIME_SEC_mvt` for departures at 10 European airports (EDDF, EDDM, EGLL, EHAM, LEBL, LEMD, LFPG, LIRF,
 LSZH, LTFM). The metric is **uncapped RMSE**.
 
+
+**Result:** ranked **45th of 250** teams (best RMSE **247.02**) the top team from Pakistan (1 of 2 Pakistani teams). Official final ranking pending.
+
+
 | version | what changed | official RMSE (Jan + Jul 2026) |
 |---|---|---|
 | v35 | LightGBM base + extreme-value ("schedule copy") detector | 303.46 |
